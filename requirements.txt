@@ -1,0 +1,7 @@
+streamlit>=1.50
+yfinance>=0.2.60
+feedparser>=6.0
+plotly>=6.0
+pandas>=2.2
+anthropic>=2.8
+trafilatura>=2.0
