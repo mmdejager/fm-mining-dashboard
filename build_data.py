@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import math
 import sys
 import traceback
@@ -45,8 +46,9 @@ ALL_TICKERS = tuple(list(COMPANY_INFO) + list(COMMODITY_INFO) + FX_TICKERS + lis
 STRIP = [("GC=F", False), ("GC=F", True), ("PL=F", False), ("PL=F", True), ("PA=F", False),
          ("SI=F", False), ("HG=F", False), ("TIO=F", False), ("BZ=F", False), (config.FX_USDZAR, None)]
 SPARK_DAYS = 90
-# Miners shown on the "vs the gold / platinum price" charts
-CHART_COMPANIES = ["ANG.JO", "GFI.JO", "HAR.JO", "DRD.JO", "IMP.JO", "VAL.JO", "NPH.JO", "SSW.JO"]
+CHART_YEARS = 3
+# Miners on the Company Tracker chart (SA gold and PGM producers)
+CHART_COMPANIES = ["ANG.JO", "GFI.JO", "HAR.JO", "IMP.JO", "VAL.JO", "NPH.JO", "SSW.JO"]
 
 
 def num(v, nd=4):
@@ -89,7 +91,7 @@ def series_stats(s: pd.Series) -> dict:
 
 
 def build_prices() -> dict:
-    closes = data.get_closes(ALL_TICKERS)
+    closes = data.get_closes(ALL_TICKERS, period="5y")   # Yahoo has no "3y"; trimmed below
     if closes.empty or closes.dropna(how="all").empty:
         raise RuntimeError("Yahoo Finance returned no prices")
     usdzar = closes[config.FX_USDZAR].dropna()
@@ -125,11 +127,12 @@ def build_prices() -> dict:
                          "ccy": data.currency_for(c["ticker"])[0], **st_})
         companies[region] = rows
 
-    # Daily series for the charts (1 year, aligned on one date axis, rebased in the page)
+    # Weekly series for the tracker charts (3 years, aligned on one date axis, rebased in the page)
     chart = {
         "Gold (ZAR/oz)": in_zar("GC=F"), "Platinum (ZAR/oz)": in_zar("PL=F"),
         "Gold (USD/oz)": commodity("GC=F"), "Silver (USD/oz)": commodity("SI=F"),
         "Platinum (USD/oz)": commodity("PL=F"), "Palladium (USD/oz)": commodity("PA=F"),
+        "Copper (USD/t)": commodity("HG=F"), "Iron ore 62% (USD/t)": commodity("TIO=F"),
     }
     for t in CHART_COMPANIES:
         if t in closes:
@@ -138,7 +141,8 @@ def build_prices() -> dict:
         if t in closes:
             chart[name] = closes[t].dropna()
     frame = pd.DataFrame(chart).sort_index()
-    frame = frame[frame.index > frame.index.max() - pd.DateOffset(years=1)].ffill()
+    frame = frame[frame.index > frame.index.max() - pd.DateOffset(years=CHART_YEARS)].ffill()
+    frame = frame.resample("W-FRI").last()   # weekly closes keep 3-year lines clean and the file small
     series = {"dates": [d.strftime("%Y-%m-%d") for d in frame.index],
               "values": {k: [num(v, 3) for v in frame[k].values] for k in frame.columns}}
 
@@ -153,10 +157,16 @@ def build_news(limit: int = 40) -> list[dict]:
     out = []
     for _, n in df.head(limit).iterrows():
         pub = n["published"]
+        summary = n["summary"] or ""
+        # Some feeds end the summary with their own name, e.g. "...20 million tonnes of annual  Australian Mining ."
+        for name in {n["source"], n["feed"]}:
+            summary = re.sub(rf"\s*{re.escape(name)}\s*\.?\s*$", "", summary).strip()
+        if summary and summary[-1] not in ".!?\u2026":
+            summary += "\u2026"
         out.append({
             "title": n["title"], "link": n["link"], "source": n["source"],
             "published": pub.isoformat() if pub is not None and not pd.isna(pub) else None,
-            "summary": n["summary"], "image": n.get("image") or "", "google": bool(n["google"]),
+            "summary": summary, "image": n.get("image") or "", "google": bool(n["google"]),
             "regions": list(n["regions"]), "commodities": list(n["commodities"]),
         })
     return out
