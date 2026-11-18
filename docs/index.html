@@ -323,7 +323,8 @@ async function fetchMining(){
   try{
     const r=await fetch(DATA_URL+'?_='+Date.now(),{cache:'no-store',signal:AbortSignal.timeout(15000)});
     if(!r.ok)throw new Error('HTTP '+r.status);
-    DATA=await r.json();
+    // Read as text first so a stray NaN in the file can't stop the whole page loading
+    DATA=JSON.parse((await r.text()).replace(/\bNaN\b|-?Infinity\b/g,'null'));
   }catch(e){
     if(!DATA){$('mine-dot').className='dot warn';$('mine-stat').textContent='Mining data not available yet (waiting for the first scheduled update)';}
   }
