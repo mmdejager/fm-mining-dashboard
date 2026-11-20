@@ -28,6 +28,8 @@ jobs:
       url: ${{ steps.deploy.outputs.page_url || steps.deploy_first.outputs.page_url }}
     steps:
       - uses: actions/checkout@v5
+        with:
+          ref: main          # always start from the latest version, not the commit that triggered the run
 
       - uses: actions/setup-python@v6
         with:
@@ -41,14 +43,21 @@ jobs:
       - name: Fetch prices and news
         run: python build_data.py
 
+      - name: Check the data file is valid
+        run: python -c "import json; json.load(open('docs/data.json')); print('data.json OK')"
+
       - name: Save data back to the repo
         run: |
           git config user.name "dashboard-bot"
           git config user.email "github-actions[bot]@users.noreply.github.com"
+          # Put the fresh data on top of the latest main, so a newer upload can never cause a merge conflict
+          cp docs/data.json "$RUNNER_TEMP/data.json"
+          git fetch origin main
+          git reset --hard origin/main
+          cp "$RUNNER_TEMP/data.json" docs/data.json
           git add docs/data.json
           git diff --cached --quiet || git commit -m "Update dashboard data [skip ci]"
-          git pull --rebase --autostash || true
-          git push || echo "Push skipped"
+          git push origin HEAD:main || echo "Push skipped (the next run will save the data)"
 
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v4
