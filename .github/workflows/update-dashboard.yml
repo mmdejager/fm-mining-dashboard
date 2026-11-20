@@ -25,11 +25,11 @@ jobs:
     timeout-minutes: 20
     environment:
       name: github-pages
-      url: ${{ steps.deploy.outputs.page_url }}
+      url: ${{ steps.deploy.outputs.page_url || steps.deploy_first.outputs.page_url }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
           cache: pip
@@ -51,8 +51,18 @@ jobs:
           git push || echo "Push skipped"
 
       - uses: actions/configure-pages@v5
-      - uses: actions/upload-pages-artifact@v3
+      - uses: actions/upload-pages-artifact@v4
         with:
           path: docs
+
+      # GitHub sometimes can't find the upload straight away ("No artifacts named github-pages").
+      # If the first publish fails, wait a minute and try once more instead of failing the run.
+      - id: deploy_first
+        uses: actions/deploy-pages@v4
+        continue-on-error: true
+      - name: Wait before retrying the publish
+        if: steps.deploy_first.outcome == 'failure'
+        run: sleep 60
       - id: deploy
+        if: steps.deploy_first.outcome == 'failure'
         uses: actions/deploy-pages@v4
